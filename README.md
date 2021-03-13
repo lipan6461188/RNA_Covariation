@@ -4,7 +4,7 @@
 
 ​	共变分析的主要目的是找出RNA结构中保守的碱基对，也叫做比较序列分析、进化分析（phylogentics analysis）。下图是分析的原理：
 
-<img src="/Users/lee/Downloads/Covariation/img/1.png" alt="covariation_priciple" style="zoom:30%;" />
+<img src="img/1.png" alt="covariation_priciple" style="zoom:30%;" />
 
 发生突变的碱基对仍然能够维持RNA二级结构不发生改变，则这些碱基对就是潜在的共变碱基对，可能具有重要的功能。
 
@@ -21,7 +21,7 @@
 
 3. [Infernal](http://eddylab.org/infernal/)可以构建共变模型，并搜索结构元件，包含了cmbuild、cmcalibrated、cmsearch、cmalign等工具
 
-4. [BLAST+](https://www.ncbi.nlm.nih.gov/books/NBK279671/)可以过滤掉cmsearch的一些假阳性hits
+4. [BLAST+](https://www.ncbi.nlm.nih.gov/books/NBK279671/)可以过滤掉cmsearch的一些假阳性hits，这是可选项
 
 5. 当前目录下的stoCov工具，主要用于可视化
 
@@ -31,7 +31,7 @@
 
 ​	在病毒上寻找保守的结构元件，大致流程如下所示：
 
-<img src="/Users/lee/Downloads/Covariation/img/2.png" alt="pipe" style="zoom:33%;" />
+<img src="img/2.png" alt="pipe" style="zoom:33%;" />
 
 1. __准备目标序列数据库__：首先从相关的数据库（这里是ViPR）中收集序列，然后去除其中高度相似的序列，做成参考序列数据库
 2. __准备种子文件__：输入序列和二级结构，做成种子，使用cmbuild和cmcalibrate构建共变模型（CM）
@@ -240,7 +240,7 @@ cmd = Visual.Plot_RNAStructure_Shape(UTR_5_seq,UTR_5_dot,covary_base,mode='fill'
 print(cmd)
 ```
 
-![covary](/Users/lee/Downloads/Covariation/img/3.png)
+![covary](img/3.png)
 
 显著共变的碱基通过红色表示。
 
@@ -248,11 +248,11 @@ print(cmd)
 
 stoCoV有5种模式：
 
-![stoV](/Users/lee/Downloads/Covariation/img/4.png)
+![stoV](img/4.png)
 
 * 模式0计算碱基对之间的RNAalignfold分数，并把不同保守程度的碱基对用不同的颜色表示
 
-  ![](/Users/lee/Downloads/Covariation/img/5.png)
+  ![](img/5.png)
 
 * 模式1和模式2都是展示某一个碱基对的比对
 
@@ -266,11 +266,11 @@ stoCoV有5种模式：
 
   输出文件varna.sh中是VARNA的可视化命令，类似下面这样：
 
-  ![](/Users/lee/Downloads/Covariation/img/7.png)
+  ![](img/7.png)
 
 * 模式4输出比对，并标记上能配对和不能配对的碱基
 
   `stoCov 4 Rscape_input.sto | les`
 
-  ![](/Users/lee/Downloads/Covariation/img/8.png)
+  ![](img/8.png)
 
