@@ -1,0 +1,288 @@
+#!/usr/bin/env python
+#-*- coding:utf-8 -*-
+
+import sys
+
+if sys.version.startswith('2'):
+    print("Should use python 3")
+    exit(-1)
+
+import sys, os, Colors, General, Structure, Covariation
+import shlex
+
+
+#####################################################
+###################  参数设置
+#####################################################
+
+import argparse
+parser = argparse.ArgumentParser(prog='stoCov', description="Find the covariation base pairs from stockholm file")
+
+subparsers = parser.add_subparsers(help='sub-command help', dest="mode")
+parser_0 = subparsers.add_parser('0', help='Calculate the covariation score for all base pairs')
+parser_1 = subparsers.add_parser('1', help='Locate the base pair by global position')
+parser_2 = subparsers.add_parser('2', help='Locate the base pair by matching the refSeq with a given subsequence')
+parser_3 = subparsers.add_parser('3', help='Write VARNA command')
+parser_4 = subparsers.add_parser('4', help='Print the all alignments, but color base with pairing status')
+
+parser_0.add_argument("-a", "--allbps", dest='allbps', action='store_true', help="Show all base pairs, not just in the structure")
+parser_0.add_argument("-m", "--minscore", dest='min_score', default=-999.0, type=float, help="Only show base pairs greater or equal than given score")
+parser_0.add_argument("-l", "--minalignscore", dest='min_align_score', default=4.0, type=float, help="Display the alignment for those base pair with score greater or equal than given score")
+
+parser_1.add_argument("-p", "--pos", dest="pos", type=int, required=True, help="The absolute position of refSeq")
+parser_1.add_argument("--rightpos", dest="right_pos", type=int, help="The position of another paired base")
+
+parser_2.add_argument("-q", "--queryseq", dest="queryseq", type=str, required=True, help="The query sequence to search")
+parser_2.add_argument("-p", "--pos", dest="pos", type=int, default=1, help="The relative position of refSeq in query sequence")
+
+parser_3.add_argument("-p", "--VARNAProg", dest="VARNAProg", type=str, default=os.environ['VARNA'], help="Set the path of VARNA jar file")
+parser_3.add_argument("-g", "--nogap", dest="removeVARNAGAP", action='store_true', help="Remove the gap when plot VARNA command")
+parser_3.add_argument("-o", "--out", dest="outfile", type=str, required=True, help="Write the VARNA command to this file")
+
+parser_4.add_argument("-t", "--tid", dest="ref_tid", type=str, help="Use sequence of tid as reference sequence")
+
+parser.add_argument("-n", "--disable_gap", dest='disable_gap', action='store_true', help="Don't show alignment with gap in base pairs")
+parser.add_argument("-f", "--flanking", dest='flanking', type=int, default=10, help="Display how many nucleotides flanking center base")
+parser.add_argument("--minseq", dest='min_seq', type=int, default=5, help="Only show covariation score with number of sequences greater or equal than given count")
+parser.add_argument("-r", "--covrange", dest='cov_range', type=str, default="0.4,0.6,0.8", help="The color range of covariation score (default: 0.4,0.6,0.8)")
+
+parser.add_argument('input_sto', help="The input stockholm file")
+
+args = parser.parse_args()
+
+data = args.cov_range.split(',')
+assert len(data)==3, "cov_range should be like 0.4,0.6,0.8"
+score_stage1, score_stage2, score_stage3 = data
+score_stage1, score_stage2, score_stage3 = float(score_stage1), float(score_stage2), float(score_stage3)
+
+#####################################################
+###################  读取注释信息
+#####################################################
+
+def read_sequence_annot(stoFn):
+    seq_desc = {}
+    for line in open(stoFn):
+        if line.startswith('#=GS'):
+            tag, ID, desc_type, desc = line.strip().split(None, 3)
+            if tag=='#=GS' and desc_type=='DE':
+                seq_desc[ID] = desc
+    return seq_desc
+
+id2seq_dict,refStr,refSeq = General.load_stockholm(args.input_sto)[0]
+seq_desc = read_sequence_annot(args.input_sto)
+
+if len(id2seq_dict) < args.min_seq:
+    print(Colors.f(f"Error: {len(id2seq_dict)} sequences is to less"))
+    exit(-1)
+
+if refStr=="" or refSeq=="":
+    print(Colors.f("Error: refStr and refSeq should be in stockholm file"))
+    exit(-1)
+
+refSeq = refSeq.upper()
+bpmap = Structure.dot2bpmap(refStr)
+
+if args.mode == '2':
+    args.queryseq = args.queryseq.upper()
+
+AlignLen = len(refSeq)
+print(f"Alignement length: {AlignLen}")
+
+def print_aligned_bp(id2seq_dict, columns, pos, ppos, flanking=10, show_gap=True, show_score=True):
+    tmp_dict = { k:id2seq_dict[k] for k in id2seq_dict }
+    maxKey = max([len(k) for k in tmp_dict.keys()]+[len('structure')])
+    
+    ### Print sequences
+    for key in tmp_dict:
+        annot = ' '
+        full_seq = "N"*flanking+tmp_dict[key].upper()+"N"*flanking
+        left_pb = full_seq[pos+flanking-1]
+        right_pb = full_seq[ppos+flanking-1]
+        left_seq = full_seq[pos:pos+flanking-1] + Colors.f(left_pb,fc='green') + full_seq[pos+flanking:pos+2*flanking]
+        right_seq = full_seq[ppos:ppos+flanking-1] + Colors.f(right_pb,fc='green') + full_seq[ppos+flanking:ppos+2*flanking]
+        if left_pb+right_pb in ('AT','TA','AU','UA','GU','UG','GT','TG','GC','CG'):
+            annot = '*'
+        if not show_gap and (left_pb == '-' or right_pb == '-'):
+            continue
+        desc = seq_desc.get(key, "")
+        print(f"%-{maxKey}s\t%s\t%s\t%s\t%s" % (key, left_seq, right_seq, annot, desc))
+    
+    ### Print structure
+    tmp_bracket_list = ['N']*flanking + bracket_list + ['N']*flanking
+    left_seq = "".join(tmp_bracket_list[pos:pos+2*flanking])
+    right_seq = "".join(tmp_bracket_list[ppos:ppos+2*flanking])
+    print(f"%-{maxKey}s\t%s\t%s" % ('structure', left_seq, right_seq))
+    if show_score:
+        mi = Covariation.calc_MI(columns[pos-1], columns[ppos-1], only_canonical=True, gap_mode='remove')
+        print(f"Mutual Information = {mi}")
+        alignfold_Score = Covariation.calc_RNAalignfold(columns[pos-1], columns[ppos-1])
+        print(f"RNAalignfold score = {alignfold_Score}")
+        alignfold_Score = Covariation.calc_RNAalignfold_stack(columns, pos, ppos)
+        print(f"RNAalignfold_stack score = {alignfold_Score}")
+
+def print_VARNA_command(id2seq_dict, refStr, outfn, VARNAProg, remove_gap=False):
+    import Visual
+    dotbracket = Structure.ct2dot(Structure.dot2ct(refStr), len(refStr))
+    highlight_region = []
+    for b1,b2,score,color in covary_bps:
+        highlight_region.append([b1,b1,color])
+        highlight_region.append([b2,b2,color])
+    OUT = open(outfn, 'w')
+    for name in id2seq_dict:
+        seq = id2seq_dict[name].replace('~','-').replace(':','-').replace(',','-').upper()
+        if remove_gap:
+            alignedPos2cleanPos = Covariation.get_alignedPos2cleanPos_dict(seq)
+            highlight_region = []
+            for b1,b2,score,color in covary_bps:
+                b1 = alignedPos2cleanPos[b1]
+                b2 = alignedPos2cleanPos[b2]
+                highlight_region.append([b1,b1,color])
+                highlight_region.append([b2,b2,color])
+            bpmap = Structure.dot2bpmap(dotbracket)
+            dot_list = list(dotbracket)
+            for i in range(len(seq)):
+                if seq[i]=='-':
+                    if i+1 in bpmap and dot_list[bpmap[i+1]-1]!='-':
+                        dot_list[bpmap[i+1]-1] = '.'
+                    dot_list[i] = '-'
+            seq = seq.replace('-','')
+            dot = "".join(dot_list).replace('-','')
+        else:
+            dot = dotbracket
+        title = name
+        if len(title)<70:
+            desc = seq_desc.get(name,"")
+            title += "=>" + desc[:70-len(title)]
+        #print(seq, dot)
+        cmd = Visual.Plot_RNAStructure_highlight(seq, dot, highlight_region=highlight_region, title=title, VARNAProg=VARNAProg)
+        cmd = cmd.replace('-bpStyle simple', '')
+        print(cmd, file=OUT)
+    OUT.close()
+
+def print_alignment(id2seq_dict, refStr, refSeq=None, refid='input'):
+    if refSeq is None:
+        refSeq = id2seq_dict[refid]
+    else:
+        refSeq = refSeq.upper().replace("T", "U")
+    
+    maxKey = max([len(k) for k in id2seq_dict.keys()]+[len('structure')])
+    
+    bpmap = Structure.dot2bpmap(refStr)
+    for key in id2seq_dict:
+        cur_seq = id2seq_dict[key].upper()
+        line = ""
+        bpbreak = 0
+        for i in range(AlignLen):
+            if i+1 in bpmap:
+                bppos = bpmap[i+1]
+                if cur_seq[i]+cur_seq[bppos-1] in ('AU', 'UA', 'GC', 'CG', 'GU', 'UG'):
+                    if cur_seq[i]==refSeq[i] and cur_seq[bppos-1]==refSeq[bppos-1]:
+                        line += cur_seq[i]
+                    elif cur_seq[i]==refSeq[i] or cur_seq[bppos-1]==refSeq[bppos-1]:
+                        line += Colors.f(cur_seq[i], fc='lightmagenta')
+                    else:
+                        line += Colors.f(cur_seq[i], fc='green')
+                else:
+                    bpbreak += 1
+                    line += Colors.f(cur_seq[i], fc='red')
+            else:
+                line += cur_seq[i]
+        desc = seq_desc.get(key, "")
+        print(f"%-{maxKey}s\t%s\tbpbreak={bpbreak}\t%s" % (key, line, desc))
+    print(f"%-{maxKey}s\t%s" % ("structure", "".join(bracket_list)))
+
+columns = Covariation.collect_columns(list(id2seq_dict.values())) #collect_columns(id2seq_dict)
+ct = Structure.dot2ct(refStr)
+bracket_list = list(refStr)
+covary_bps = []
+for b1,b2 in ct:
+    rnaalignscore2 = Covariation.calc_RNAalignfold_stack(columns, b1, b2)
+    
+    #if rnaalignscore2<args.min_score:
+    #    continue
+    if rnaalignscore2<score_stage1:
+        continue
+    elif rnaalignscore2<score_stage2:
+        color = 'cyan'
+        covary_bps.append([b1,b2,rnaalignscore2,'#08b0f2'])
+    elif rnaalignscore2<score_stage3:
+        color = 'green'
+        covary_bps.append([b1,b2,rnaalignscore2,'#12c634'])
+    else:
+        color = 'red'
+        covary_bps.append([b1,b2,rnaalignscore2,'#ed0c0c'])
+    bracket_list[b1-1] = Colors.f(bracket_list[b1-1], fc=color)
+    bracket_list[b2-1] = Colors.f(bracket_list[b2-1], fc=color)
+
+if args.mode == '0':
+    # 显示所有的碱基对
+    if args.allbps:
+        ct = []
+        for i in range(1, AlignLen+1):
+            for j in range(i+1, AlignLen+1):
+                ct.append((i, j))
+    print( f"(Base pairs)\t%-20s\t%-20s\t%-20s" % ("MI", "RNAalignfold", "RNAalignfold_stack"))
+    for b1,b2 in ct:
+        mi = Covariation.calc_MI(columns[b1-1], columns[b2-1], only_canonical=True, gap_mode='remove')
+        
+        rnaalignscore = Covariation.calc_RNAalignfold(columns[b1-1], columns[b2-1])
+        rnaalignscore2 = Covariation.calc_RNAalignfold_stack(columns, b1, b2)
+        
+        if rnaalignscore2 >= args.min_score:
+            line = "(%-4s,%-4s)\t%-20s\t%-20s\t%-20s" % (b1, b2, round(mi, 3),round(rnaalignscore, 3),round(rnaalignscore2, 3))
+            if rnaalignscore2<score_stage1:
+                line = Colors.f( line, fc="blue" )
+            elif rnaalignscore2<score_stage2:
+                line = Colors.f( line, fc="cyan" )
+            elif rnaalignscore2<score_stage3:
+                line = Colors.f( line, fc="green" )
+            else:
+                line = Colors.f( line, fc="red" )
+            print( line )
+            if rnaalignscore2 >= args.min_align_score:
+                print_aligned_bp(id2seq_dict, columns, b1, b2, show_gap=(not args.disable_gap), 
+                    flanking=args.flanking, show_score=False)
+elif args.mode == '2':
+    start, end = Structure.align_find(refSeq, args.queryseq)
+    if start == -1:
+        print(Colors.f("Error: Sequence not found", fc='red'))
+        exit(-1)
+    
+    pos = start
+    while args.pos>1:
+        if refSeq[pos-1]!='-':
+            args.pos -= 1
+        pos += 1
+    
+    pairing_pos = bpmap.get(pos, 0)
+    print("Pairing:", pos, pairing_pos)
+    if pairing_pos!=0:
+        print_aligned_bp(id2seq_dict, columns, pos, pairing_pos, flanking=args.flanking, show_gap=(not args.disable_gap))
+    else:
+        print(Colors.f("Error: No pairing base", fc='red'))
+        exit(-1)
+elif args.mode == '1':
+    if args.right_pos is not None:
+        pairing_pos = args.right_pos
+    else:
+        pairing_pos = bpmap.get(args.pos, 0)
+    print("Pairing:", args.pos, pairing_pos)
+    if pairing_pos!=0:
+        print_aligned_bp(id2seq_dict, columns, args.pos, pairing_pos, flanking=args.flanking, 
+            show_gap=(not args.disable_gap))
+    else:
+        print(Colors.f("Error: No pairing base", fc='red'))
+        exit(-1)
+elif args.mode == '3':
+    print_VARNA_command(id2seq_dict, refStr, args.outfile, args.VARNAProg, args.removeVARNAGAP)
+elif args.mode == '4':
+    if args.ref_tid is not None:
+        refSeq = None
+    print_alignment(id2seq_dict, refStr, refSeq=refSeq, refid=args.ref_tid)
+else:
+    print(Colors.f("Error: Unknown mode", fc='red'))
+    exit(-1)
+
+
+
+
