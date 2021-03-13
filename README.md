@@ -182,6 +182,30 @@ Covariation.dot2sto({'input':[UTR_5_seq,UTR_5_dot]}, "input", input_sto, refSeq=
 Covariation.Build_Rfam_seed(input_sto, UTR_5_seq, os.path.join(DATA_DIR, 'Flavivirus-1119.fasta'), WORK_DIR, iteration=3, blastFilter=None, use_LSF=True, cores=5, verbose=True)
 ```
 
+如果要使用blast，首先构建blast索引：
+
+```shell
+cd data
+makeblastdb -in Flavivirus-1119.fasta -dbtype nucl -title Flavivirus -parse_seqids -out Flavivirus
+```
+
+然后在调用`Build_Rfam_seed`时，引入blast的信息：
+
+```python
+blastFilter = { 'full_seq': UTR_5_seq,  # The full length sequence contain input_seq
+                'blastdb': blastdb, 
+                'flanking': 20, # Max distance between the cmsearch result and blast result
+                'blast_identity': 0.4, # Blast cutoff
+                'min_match': 5, # Minimun target
+                'ignore_seq': ['input'] # Which results to ignore
+}
+Covariation.Build_Rfam_seed(input_sto, UTR_5_seq, os.path.join(DATA_DIR, 'Flavivirus-1119.fasta'), WORK_DIR, iteration=3, blastFilter=blastFilter, use_LSF=True, cores=5, verbose=True)
+```
+
+但是注意在我们做Zika的5‘UTR这个情况下是不推荐使用blast来过滤的，因为很多黄热病毒的5’UTR和ZIKV差别较大，blast根本搜索不到，比如Dengue病毒和我们输入的序列之间差别就比较大，blast根本搜索不到：
+
+![](img/9.png)
+
 #### 5.1 通过R-scape计算保守碱基对
 
 ```python
@@ -258,7 +282,7 @@ stoCoV有5种模式：
 
   `stoCov 1 -p 8 Rscape_input.sto | les`
 
-  ![](/Users/lee/Downloads/Covariation/img/6.png)
+  ![](img/6.png)
 
 * 模式3把比对中所有的序列导出成VARNA命令
 
